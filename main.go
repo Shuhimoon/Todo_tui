@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/sys/unix"
@@ -14,37 +15,55 @@ import (
 var (
 	logFilePath = "/var/log/golang/todo_tui.log"
 	logFile     *os.File
+	ws          *unix.Winsize
 )
 
 // 定義 Model 結構體，儲存狀態
 type model struct {
-	title   string // 方框頂部標題
-	content string // 方框內的文字
+	title string // 方框頂部標題
+	// content string // 方框內的文字
+	textInput textinput.Model
+	// inputValue string
 }
 
 // 初始化 Model
 func initialModel() model {
+	ti := textinput.New()
+	ti.Placeholder = "group name ...."
+	ti.Focus()
+	ti.Width = int(ws.Col) - 2
 	return model{
-		title:   "group", // 你的標題
-		content: "這是方框內的內容！\n你可以放多行文字~~",
+		title: "group", // 你的標題
+		// content: "這是方框內的內容！\n你可以放多行文字~~",
+		textInput: ti,
+		// inputValue: "",
 	}
 }
 
 // Init 方法：啟動時執行的命令（這裡無需）
 func (m model) Init() tea.Cmd {
-	return nil
+	return textinput.Blink
 }
 
 // Update 方法：處理訊息（如按鍵）
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// 按 'q' 或 Ctrl+C 退出
-		if msg.String() == "q" || msg.String() == "ctrl+c" {
+		switch msg.String() {
+		// Ctrl+C 退出
+		case "ctrl+c":
 			return m, tea.Quit
+		case "enter":
+			// m.inputValue = m.textInput.Value()
+			m.textInput.SetValue("")
+			return m, nil
 		}
 	}
-	return m, nil
+
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
 }
 
 // View 方法：渲染 UI，使用 Lipgloss 繪製帶標題的方框
@@ -59,8 +78,8 @@ func (m model) View() string {
 		log.SetOutput(logFile)
 	}
 
-	// 當前視窗大小
-	ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
+	// 更新(萬一有賤人換大小) 當前視窗大小
+	ws, err = unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
 	if err != nil {
 		fmt.Print("")
 	}
@@ -78,7 +97,7 @@ func (m model) View() string {
 		Align(lipgloss.Center)                       // 內容居中
 
 	// 渲染內容方框（無頂邊框）
-	contentBox := contentStyle.Render(m.content)
+	contentBox := contentStyle.Render(m.textInput.View())
 
 	// 定義邊框樣式
 	borderStyle := lipgloss.NewStyle().
@@ -113,10 +132,18 @@ func (m model) View() string {
 	fullBox := lipgloss.JoinVertical(lipgloss.Top, titleRow, contentBox)
 
 	// 添加說明文字
-	return fmt.Sprintf("%s\n\n按 'q' 退出", fullBox)
+	return fmt.Sprintf("%s\n\n 'ctrl + c' Exit", fullBox)
 }
 
 func main() {
+	// 當前視窗大小初始化
+	var err error
+	ws, err = unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
+	if err != nil {
+		fmt.Printf("想辦法找瞜XD 錯誤無法取得終端大小： %v\n", err)
+		os.Exit(1)
+	}
+
 	p := tea.NewProgram(initialModel())
 	if _, err := p.Run(); err != nil {
 		fmt.Println("錯誤:", err)
